@@ -1,116 +1,20 @@
-# import streamlit as st
-# from langchain.vectorstores.chroma import Chroma
-# from langchain_community.llms.ollama import Ollama
-# from langchain.memory import ConversationBufferMemory
-# from langchain.chains import ConversationalRetrievalChain
-# from langchain.prompts import PromptTemplate
-# from get_embedding_function import get_embedding_function
-# from text_preprocessing import preprocess_text
-# from htmlTemplates import css, bot_template, user_template
-
-# # Configuración inicial
-# def setup():
-#     st.set_page_config(page_title="LegisChat", page_icon="⚖️")
-#     st.write(css, unsafe_allow_html=True)
-#     st.header("Chat con Documentos Legales ⚖️")
-    
-#     if "conversation_chain" not in st.session_state:
-#         st.session_state.conversation_chain = None
-#     if "chat_history" not in st.session_state:
-#         st.session_state.chat_history = []
-
-# # Cargar Chroma
-# def load_chroma():
-#     embedding_function = get_embedding_function()
-#     return Chroma(persist_directory="chroma", embedding_function=embedding_function)
-
-# # Definir el prompt personalizado
-# PROMPT_TEMPLATE = """
-# Eres un asistente especializado en leyes y propuestas legislativas. Tu tarea es responder preguntas relacionadas con el contenido de propuestas de ley y artículos legales, utilizando únicamente la información proporcionada en el contexto. Sigue estas pautas:
-
-# 1. **Contexto legal**: Responde como si fueras un experto en leyes, utilizando un lenguaje formal y técnico adecuado para el ámbito jurídico.
-# 2. **Precisión**: Basa tu respuesta estrictamente en el contexto proporcionado. Si no hay información suficiente, indica que no puedes responder con certeza.
-# 3. **Claridad**: Explica los conceptos de manera clara y estructurada, utilizando términos jurídicos correctos.
-# 4. **Formato**: Si es necesario, organiza la respuesta en puntos o párrafos para facilitar la lectura.
-
-# Contexto proporcionado:
-# {context}
-
-# ---
-
-# Pregunta: {question}
-
-# Respuesta (en español):
-# """
-
-# # Crear cadena de conversación
-# def create_conversation_chain(vectorstore):
-#     llm = Ollama(model="llama3.2")
-    
-#     # Memoria para el historial
-#     memory = ConversationBufferMemory(
-#         memory_key="chat_history",
-#         return_messages=True,
-#         output_key="answer"
-#     )
-    
-#     # Definir el prompt personalizado
-#     prompt = PromptTemplate(
-#         template=PROMPT_TEMPLATE,
-#         input_variables=["context", "question"]
-#     )
-    
-#     # Cadena de conversación con el prompt personalizado
-#     return ConversationalRetrievalChain.from_llm(
-#         llm=llm,
-#         retriever=vectorstore.as_retriever(),  # Usamos el retriever estándar
-#         memory=memory,
-#         return_source_documents=True,
-#         combine_docs_chain_kwargs={"prompt": prompt}  # Pasamos el prompt personalizado
-#     )
-
-# # Manejar preguntas
-# def handle_question(question):
-#     # Preprocesar la pregunta antes de pasarla a la cadena
-#     processed_question = preprocess_text(question)
-    
-#     # Obtener la respuesta del modelo
-#     response = st.session_state.conversation_chain({"question": processed_question})
-    
-#     # Mostrar historial
-#     for msg in response["chat_history"]:
-#         if msg.type == "human":
-#             st.write(user_template.replace("{{MSG}}", msg.content), unsafe_allow_html=True)
-#         else:
-#             st.write(bot_template.replace("{{MSG}}", msg.content), unsafe_allow_html=True)
-
-# # Función principal
-# def main():
-#     setup()
-#     vectorstore = load_chroma()
-    
-#     if st.session_state.conversation_chain is None:
-#         st.session_state.conversation_chain = create_conversation_chain(vectorstore)
-    
-#     user_question = st.text_input("Haz tu pregunta legal:")
-#     if user_question:
-#         handle_question(user_question)
-
-# if __name__ == "__main__":
-#     main()
-
 import streamlit as st
-from langchain.vectorstores.chroma import Chroma
-from langchain_community.llms.ollama import Ollama
+from langchain_pinecone import PineconeVectorStore
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
-from langchain.chains.question_answering import load_qa_chain
-from langchain.chains.qa_with_sources import load_qa_with_sources_chain
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
 from get_embedding_function import get_embedding_function
 from text_preprocessing import preprocess_text
 from htmlTemplates import css, bot_template, user_template
+import os
+from dotenv import load_dotenv
+from pinecone import Pinecone
+from operator import itemgetter
+
+# Cargar variables de entorno
+load_dotenv()
 
 # Configuración inicial
 def setup():
@@ -118,8 +22,8 @@ def setup():
     st.write(css, unsafe_allow_html=True)
     st.header("Chat con Documentos Legales ⚖️")
     
-    if "conversation_chain" not in st.session_state:
-        st.session_state.conversation_chain = None
+    if "chain" not in st.session_state:
+        st.session_state.chain = None
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     if "memory" not in st.session_state:
@@ -130,51 +34,83 @@ def setup():
             k=5                    
         )
 
-# Carga la base de datos vectorial ChromaDB
-def load_chroma():
+# Carga la base de datos vectorial Pinecone
+def load_pinecone():
     embedding_function = get_embedding_function()
-    return Chroma(persist_directory="chroma/", embedding_function=embedding_function)
+    # Asegúrate de tener estas variables en tu archivo .env
+    index_name = os.getenv("PINECONE_INDEX_NAME")
+    
+    # Inicializar Pinecone con la nueva API
+    Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+    
+    return PineconeVectorStore(
+        index_name=index_name,
+        embedding=embedding_function,
+        text_key="text"  # El campo que contiene el texto en Pinecone
+    )
 
 # Definir el prompt con "context"
-prompt = PromptTemplate(
-    template="""
-    Eres un asistente legal altamente calificado.
-    Responde de manera clara y precisa con base en los documentos legales provistos.
-    Si no puedes responder con certeza, indica que no tienes suficiente información.
+ANSWER_PROMPT = PromptTemplate.from_template("""
+Eres un asistente legal altamente calificado.
+Responde de manera clara y precisa con base en los documentos legales provistos.
+Si no puedes responder con certeza, indica que no tienes suficiente información.
 
-    Contexto:
-    {context}
+Contexto:
+{context}
 
-    Pregunta: {question}
+Pregunta: {question}
 
-    Respuesta:
-    """,
-    input_variables=["context", "question"]
-)
+Respuesta:
+""")
 
-# Creación de la cadena conversacional
+# Prompt para generar preguntas más precisas basado en el historial
+CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template("""
+Dado el historial de conversación: {chat_history} y la nueva pregunta: {question}, 
+reestructura la pregunta si es necesario para hacerla más precisa.
+
+Pregunta reestructurada:
+""")
+
+# Creación de la cadena conversacional moderna
 def create_conversation_chain(vectorstore):
-    llm = Ollama(model="llama3.2")
-    memory = st.session_state.memory
-    retriever = vectorstore.as_retriever()
+    # Modelo de lenguaje
+    llm = ChatOpenAI(
+        model_name="gpt-3.5-turbo",
+        temperature=0,
+        openai_api_key=os.getenv("OPENAI_API_KEY")
+    )
     
-    # Generador de preguntas basado en el historial
-    question_prompt = PromptTemplate(
-        template="Dado el historial de conversación: {chat_history} y la nueva pregunta: {question}, reestructura la pregunta si es necesario.",
-        input_variables=["chat_history", "question"]
+    # Retriever
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+    
+    # Cadena para condensar la pregunta basada en el historial
+    condense_question_chain = (
+        {"question": itemgetter("question"), "chat_history": itemgetter("chat_history")}
+        | CONDENSE_QUESTION_PROMPT
+        | llm
+        | StrOutputParser()
     )
-    question_generator = LLMChain(llm=llm, prompt=question_prompt)
-
-    # Cadena para responder preguntas basadas en documentos
-    qa_chain = load_qa_chain(llm, chain_type="stuff", prompt=prompt)
-
-    return ConversationalRetrievalChain(
-        retriever=retriever,
-        memory=memory,
-        return_source_documents=True,
-        question_generator=question_generator,  # ✅ Ahora se incluye correctamente
-        combine_docs_chain=qa_chain  # ✅ Se pasa en el formato correcto
+    
+    # Cadena para responder
+    answer_chain = (
+        {"context": itemgetter("context"), "question": itemgetter("question")}
+        | ANSWER_PROMPT
+        | llm
+        | StrOutputParser()
     )
+    
+    # Cadena completa de RAG conversacional
+    chain = (
+        {"question": itemgetter("question"), "chat_history": itemgetter("chat_history")}
+        | condense_question_chain
+        | (lambda condensed_question: {
+            "context": retriever.get_relevant_documents(condensed_question),
+            "question": condensed_question
+        })
+        | answer_chain
+    )
+    
+    return chain
 
 def handle_question(question):
     processed_question = preprocess_text(question)
@@ -182,30 +118,37 @@ def handle_question(question):
         st.warning("Por favor, ingresa una pregunta válida.")
         return
 
-    with st.spinner("Cargando..."):  # 🔹 Agrega un spinner normal
-        response = st.session_state.conversation_chain({"question": processed_question})
+    with st.spinner("Cargando..."):
+        # Obtener historial de chat del estado de la sesión para la memoria
+        chat_history = []
+        for role, msg in st.session_state.chat_history:
+            if role == "user":
+                chat_history.append({"role": "user", "content": msg})
+            else:
+                chat_history.append({"role": "assistant", "content": msg})
+                
+        # Invocar la cadena con la nueva pregunta y el historial
+        response = st.session_state.chain.invoke({
+            "question": processed_question, 
+            "chat_history": chat_history
+        })
     
+    # Actualizar historial de chat
     st.session_state.chat_history.append(("user", question))
-    st.session_state.chat_history.append(("bot", response["answer"]))
+    st.session_state.chat_history.append(("bot", response))
 
     # Renderizar historial de chat
     for role, msg in st.session_state.chat_history:
         template = user_template if role == "user" else bot_template
         st.write(template.replace("{{MSG}}", msg), unsafe_allow_html=True)
 
-    # Mostrar documentos fuente si existen
-    for doc in response.get("source_documents", []):
-        st.markdown(f"**Fuente:** {doc.metadata.get('source', 'Desconocida')}")
-
-
-
 # Función principal
 def main():
     setup()
-    vectorstore = load_chroma()
+    vectorstore = load_pinecone()
     
-    if st.session_state.conversation_chain is None:
-        st.session_state.conversation_chain = create_conversation_chain(vectorstore)
+    if st.session_state.chain is None:
+        st.session_state.chain = create_conversation_chain(vectorstore)
     
     user_question = st.text_input("Haz tu pregunta legal:")
     if user_question:
