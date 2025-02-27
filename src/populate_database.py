@@ -3,15 +3,15 @@ import os
 from langchain.document_loaders.pdf import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema.document import Document
-from get_embedding_function import get_embedding_function
+from src.get_embedding_function import get_embedding_function
 from langchain_pinecone import PineconeVectorStore
-from text_preprocessing import preprocess_text
+from src.text_preprocessing import preprocess_text
 from dotenv import load_dotenv
 from datetime import datetime
 import uuid
 from pinecone import Pinecone, ServerlessSpec
 import time
-
+from src.config import PINECONE_API_KEY, PINECONE_INDEX_NAME
 # Cargar variables de entorno
 load_dotenv()
 
@@ -59,6 +59,19 @@ def main():
         add_to_pinecone(chunks, index_name, pc)
     else:
         print("❌ No se encontraron documentos para procesar.")
+
+def load_pinecone():
+    """Carga la base de datos vectorial Pinecone"""
+    embedding_function = get_embedding_function()
+    
+    # Inicializar Pinecone con la nueva API
+    Pinecone(api_key=PINECONE_API_KEY)
+    
+    return PineconeVectorStore(
+        index_name=PINECONE_INDEX_NAME,
+        embedding=embedding_function,
+        text_key="text"  # El campo que contiene el texto en Pinecone
+    )
 
 def load_documents_from_directory(directory_path, doc_type):
     document_loader = PyPDFDirectoryLoader(directory_path)
