@@ -15,7 +15,14 @@ import time
 # Cargar variables de entorno
 load_dotenv()
 
-DATA_PATH = "data"
+# Definición de directorios
+ROOT_DATA_PATH = "data"
+DOCUMENT_TYPES = {
+    "01_constitucion": "constitucion",
+    "02_convenios_internacionales": "convenio_internacional",
+    "03_leyes": "ley",
+    "04_codigos": "codigo"
+}
 
 def main():
     # Verificar si se debe limpiar la base de datos (usando el flag --reset).
@@ -35,18 +42,36 @@ def main():
         print("✨ Clearing Database")
         clear_database(pc, index_name)
 
-    # Crear (o actualizar) el almacén de datos.
-    documents = load_documents()
-    chunks = split_documents(documents)
-    add_to_pinecone(chunks, index_name, pc)
+    # Cargar documentos de cada directorio
+    all_documents = []
+    for subdir, doc_type in DOCUMENT_TYPES.items():
+        dir_path = os.path.join(ROOT_DATA_PATH, subdir)
+        if os.path.exists(dir_path):
+            print(f"📚 Cargando documentos de {subdir} (tipo: {doc_type})")
+            documents = load_documents_from_directory(dir_path, doc_type)
+            all_documents.extend(documents)
+        else:
+            print(f"⚠️ El directorio {dir_path} no existe.")
 
-def load_documents():
-    document_loader = PyPDFDirectoryLoader(DATA_PATH)
+    # Procesar y almacenar documentos
+    if all_documents:
+        chunks = split_documents(all_documents)
+        add_to_pinecone(chunks, index_name, pc)
+    else:
+        print("❌ No se encontraron documentos para procesar.")
+
+def load_documents_from_directory(directory_path, doc_type):
+    document_loader = PyPDFDirectoryLoader(directory_path)
     documents = document_loader.load()
     
-    # Aplicar preprocesamiento a cada documento
+    # Aplicar preprocesamiento y agregar metadatos de tipo de documento
     for doc in documents:
         doc.page_content = preprocess_text(doc.page_content)
+        doc.metadata["doc_type"] = doc_type
+        
+        # Extraer el nombre base del archivo para facilitar búsquedas específicas
+        source_path = doc.metadata.get("source", "")
+        doc.metadata["filename"] = os.path.basename(source_path)
     
     return documents
 
@@ -61,12 +86,13 @@ def split_documents(documents: list[Document]):
     
     # Imprimir los chunks generados
     print("📄 Chunks generados:")
-    for i, chunk in enumerate(chunks):
+    for i, chunk in enumerate(chunks[:3]):  # Mostrar solo los primeros 3 para no saturar la consola
         print(f"\nChunk {i + 1}:")
-        print(chunk.page_content)
+        print(chunk.page_content[:200] + "..." if len(chunk.page_content) > 200 else chunk.page_content)
         print(f"Metadata: {chunk.metadata}")
         print("-" * 50)
     
+    print(f"Total de chunks generados: {len(chunks)}")
     return chunks
 
 def add_to_pinecone(chunks: list[Document], index_name: str, pc: Pinecone):
@@ -79,11 +105,12 @@ def add_to_pinecone(chunks: list[Document], index_name: str, pc: Pinecone):
     timestamp = datetime.now().isoformat()
     for chunk in chunks:
         if "id" not in chunk.metadata:
-            # Crear ID único basado en la fuente, página y UUID
-            source = chunk.metadata.get("source", "unknown")
+            # Crear ID único basado en la fuente, página, tipo y UUID
+            source = chunk.metadata.get("filename", "unknown")
             page = chunk.metadata.get("page", "0")
-            unique_id = str(uuid.uuid4())[:8]  # Usar los primeros 8 caracteres del UUID
-            chunk.metadata["id"] = f"{source}:{page}:{unique_id}"
+            doc_type = chunk.metadata.get("doc_type", "unknown")
+            unique_id = str(uuid.uuid4())[:8]
+            chunk.metadata["id"] = f"{doc_type}:{source}:{page}:{unique_id}"
         
         # Añadir fecha de creación
         chunk.metadata["created_at"] = timestamp
@@ -111,7 +138,7 @@ def ensure_index_exists(pc: Pinecone, index_name: str):
         
         # Crear índice con dimensiones para el modelo de embeddings
         # Usar ServerlessSpec si utilizas Pinecone serverless
-        region = os.getenv("PINECONE_REGION", "us-east-1")  # Valor predeterminado us-west-2
+        region = os.getenv("PINECONE_REGION", "us-east-1")  # Valor predeterminado us-east-1
         cloud = os.getenv("PINECONE_CLOUD", "aws")         # Valor predeterminado aws
         
         pc.create_index(
