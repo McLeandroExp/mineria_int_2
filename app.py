@@ -2,7 +2,7 @@ import streamlit as st
 from langchain.memory import ConversationBufferMemory
 from src.populate_database import load_pinecone
 from src.utils.chains import create_conversation_chain
-from src.populate_database import preprocess_text
+from src.text_preprocessing import preprocess_text
 from src.htmlTemplates import css, bot_template, user_template
 from src.config import DOCUMENT_TYPES, MEMORY_K
 
