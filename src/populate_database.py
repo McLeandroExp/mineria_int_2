@@ -1,18 +1,18 @@
 import argparse
 import os
+import re
+import unicodedata
 from langchain.document_loaders.pdf import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema.document import Document
 from .get_embedding_function import get_embedding_function
 from langchain_pinecone import PineconeVectorStore
-# from src.text_preprocessing import preprocess_text
 from dotenv import load_dotenv
 from datetime import datetime
 import uuid
 from pinecone import Pinecone, ServerlessSpec
 import time
 from .config import PINECONE_API_KEY, PINECONE_INDEX_NAME
-# Al inicio, agrega la importación de la función normalize_filename
 from .utils.normalize_filename import normalize_filename
 
 # Cargar variables de entorno
@@ -42,26 +42,42 @@ def main():
     
     # Si se solicita reiniciar la base de datos
     if args.reset:
-        print("✨ Clearing Database")
         clear_database(pc, index_name)
 
+    # Verificar la existencia del índice
+    ensure_index_exists(pc, index_name)
+    
+    # Rastrear archivos ya procesados
+    existing_files = get_existing_files(pc, index_name) if not args.reset else set()
+    
     # Cargar documentos de cada directorio
-    all_documents = []
+    new_documents = []
     for subdir, doc_type in DOCUMENT_TYPES.items():
         dir_path = os.path.join(ROOT_DATA_PATH, subdir)
         if os.path.exists(dir_path):
-            print(f"📚 Cargando documentos de {subdir} (tipo: {doc_type})")
-            documents = load_documents_from_directory(dir_path, doc_type)
-            all_documents.extend(documents)
-        else:
-            print(f"⚠️ El directorio {dir_path} no existe.")
+            documents = load_new_documents(dir_path, doc_type, existing_files)
+            new_documents.extend(documents)
 
-    # Procesar y almacenar documentos
-    if all_documents:
-        chunks = split_documents(all_documents)
+    # Procesar y almacenar documentos nuevos
+    if new_documents:
+        chunks = split_documents(new_documents)
         add_to_pinecone(chunks, index_name, pc)
     else:
-        print("❌ No se encontraron documentos para procesar.")
+        print("No se encontraron nuevos documentos para procesar.")
+
+def to_ascii_id(text):
+    """
+    Convierte un texto a un ID compatible con ASCII.
+    Elimina acentos, espacios, caracteres especiales y paréntesis.
+    """
+    # Normalizar para separar acentos de las letras
+    text = unicodedata.normalize('NFKD', text)
+    # Filtrar caracteres no ASCII y reemplazar caracteres problemáticos
+    text = re.sub(r'[^\x00-\x7F]+', '', text)  # Eliminar caracteres no ASCII
+    text = re.sub(r'[^\w\s-]', '', text)       # Eliminar caracteres especiales
+    text = re.sub(r'[\(\)\[\]\{\}]', '', text) # Eliminar paréntesis y corchetes
+    text = re.sub(r'\s+', '_', text)           # Reemplazar espacios con guiones bajos
+    return text
 
 def load_pinecone():
     """Carga la base de datos vectorial Pinecone"""
@@ -76,22 +92,49 @@ def load_pinecone():
         text_key="text"  # El campo que contiene el texto en Pinecone
     )
 
-def load_documents_from_directory(directory_path, doc_type):
+def get_existing_files(pc, index_name):
+    """Obtiene la lista de archivos ya indexados en Pinecone"""
+    try:
+        index = pc.Index(index_name)
+        # Obtener una muestra de vectores para extraer los metadatos
+        query_response = index.query(
+            vector=[0.0] * 3072,  # Vector de consulta dummy
+            top_k=10000,          # Número máximo de registros a recuperar
+            include_metadata=True
+        )
+        
+        # Extraer los nombres de archivo únicos
+        existing_files = set()
+        for match in query_response.matches:
+            if 'filename' in match.metadata and 'source' in match.metadata:
+                existing_files.add(match.metadata['source'])
+                
+        return existing_files
+    except Exception as e:
+        print(f"Error al obtener archivos existentes: {e}")
+        return set()
+
+def load_new_documents(directory_path, doc_type, existing_files):
+    """Carga solo documentos nuevos que no están en existing_files"""
     document_loader = PyPDFDirectoryLoader(directory_path)
     documents = document_loader.load()
     
-    # Aplicar preprocesamiento y agregar metadatos de tipo de documento
+    new_documents = []
     for doc in documents:
-        # doc.page_content = preprocess_text(doc.page_content)
-        doc.metadata["doc_type"] = doc_type
-        
-        # Extraer y normalizar el nombre base del archivo para búsquedas específicas
         source_path = doc.metadata.get("source", "")
-        original_filename = os.path.basename(source_path)
-        doc.metadata["filename"] = normalize_filename(original_filename)
+        
+        # Verificar si el documento ya existe en la base de datos
+        if source_path not in existing_files:
+            # Extraer y normalizar el nombre base del archivo
+            original_filename = os.path.basename(source_path)
+            doc.metadata["filename"] = normalize_filename(original_filename)
+            doc.metadata["doc_type"] = doc_type
+            new_documents.append(doc)
     
-    return documents
-
+    if new_documents:
+        print(f"Encontrados {len(new_documents)} documentos nuevos en {directory_path}")
+    
+    return new_documents
 
 def split_documents(documents: list[Document]):
     text_splitter = RecursiveCharacterTextSplitter(
@@ -101,67 +144,81 @@ def split_documents(documents: list[Document]):
         separators=["\n\n", "\n", ".", "?", "!", " ", ""] 
     )
     chunks = text_splitter.split_documents(documents)
-    
-    # Imprimir los chunks generados
-    print("📄 Chunks generados:")
-    for i, chunk in enumerate(chunks[:3]):  # Mostrar solo los primeros 3 para no saturar la consola
-        print(f"\nChunk {i + 1}:")
-        print(chunk.page_content[:200] + "..." if len(chunk.page_content) > 200 else chunk.page_content)
-        print(f"Metadata: {chunk.metadata}")
-        print("-" * 50)
-    
     print(f"Total de chunks generados: {len(chunks)}")
     return chunks
 
 def add_to_pinecone(chunks: list[Document], index_name: str, pc: Pinecone):
     embedding_function = get_embedding_function()
     
-    # Asegurarse de que el índice existe
-    ensure_index_exists(pc, index_name)
-    
-    # Añadir fecha de creación a los metadatos
+    # Añadir fecha de creación y generar ID apropiado para cada chunk
     timestamp = datetime.now().isoformat()
+    
     for chunk in chunks:
-        if "id" not in chunk.metadata:
-            # Crear ID único basado en la fuente, página, tipo y UUID
-            source = chunk.metadata.get("filename", "unknown")
-            page = chunk.metadata.get("page", "0")
-            doc_type = chunk.metadata.get("doc_type", "unknown")
-            unique_id = str(uuid.uuid4())[:8]
-            chunk.metadata["id"] = f"{doc_type}:{source}:{page}:{unique_id}"
+        # Obtener metadatos necesarios
+        source = chunk.metadata.get("filename", "unknown")
+        page = chunk.metadata.get("page", "0")
+        page_label = chunk.metadata.get("page_label", page)
+        doc_type = chunk.metadata.get("doc_type", "unknown")
+        unique_id = str(uuid.uuid4())[:8]
+        
+        # Asegurar que los componentes del ID sean ASCII
+        ascii_doc_type = to_ascii_id(doc_type)
+        ascii_source = to_ascii_id(source)
+        
+        # Generar ID que será usado como ID primario en Pinecone (solo ASCII)
+        chunk_id = f"{ascii_doc_type}:{ascii_source}:{page}:{unique_id}"
+        
+        # Establecer el ID tanto en el metadato como para el vector
+        chunk.metadata["id"] = chunk_id
         
         # Añadir fecha de creación
         chunk.metadata["created_at"] = timestamp
-        # Integrar metadatos en el texto que se usará para los embeddings
+        
+        # Guardar los valores originales en los metadatos para búsquedas
+        chunk.metadata["original_doc_type"] = doc_type
+        chunk.metadata["original_filename"] = source
+        
+        # Integrar solo los metadatos necesarios en el texto para los embeddings
         chunk.metadata["text"] = (
-            f"Tipo: {chunk.metadata.get('doc_type', '')}. "
-            f"Archivo: {chunk.metadata.get('filename', '')}. "
+            f"Tipo: {doc_type}. "
+            f"Archivo: {source}. "
+            f"Página: {page_label}. "
             f"{chunk.page_content}"
         )
     
-    # Crear o actualizar el almacén vectorial
-    vector_store = PineconeVectorStore.from_documents(
-        documents=chunks,
-        embedding=embedding_function,
-        index_name=index_name,
-        text_key="text"
-    )
+    # Crear vectores con IDs personalizados
+    vectors_with_ids = []
     
-    print(f"✅ Documentos añadidos a Pinecone exitosamente")
+    # Obtener embeddings para todos los chunks
+    texts = [chunk.metadata["text"] for chunk in chunks]
+    embeddings = embedding_function.embed_documents(texts)
+    
+    # Crear vectores con IDs personalizados
+    for i, chunk in enumerate(chunks):
+        vectors_with_ids.append({
+            "id": chunk.metadata["id"],
+            "values": embeddings[i],
+            "metadata": chunk.metadata
+        })
+    
+    # Insertar directamente en el índice de Pinecone
+    index = pc.Index(index_name)
+    
+    # Insertar en lotes para manejar grandes cantidades de datos
+    batch_size = 100
+    for i in range(0, len(vectors_with_ids), batch_size):
+        batch = vectors_with_ids[i:i+batch_size]
+        index.upsert(vectors=batch)
+    
+    print(f"Documentos añadidos a Pinecone exitosamente")
 
 def ensure_index_exists(pc: Pinecone, index_name: str):
     """Asegura que el índice existe, si no, lo crea"""
-    # Obtener lista de índices disponibles
     indexes = pc.list_indexes()
     
-    # Comprobar si el índice existe
     if index_name not in indexes.names():
-        print(f"🔍 Creando índice {index_name}")
-        
-        # Crear índice con dimensiones para el modelo de embeddings
-        # Usar ServerlessSpec si utilizas Pinecone serverless
-        region = os.getenv("PINECONE_REGION", "us-east-1")  # Valor predeterminado us-east-1
-        cloud = os.getenv("PINECONE_CLOUD", "aws")         # Valor predeterminado aws
+        region = os.getenv("PINECONE_REGION", "us-east-1")
+        cloud = os.getenv("PINECONE_CLOUD", "aws")
         
         pc.create_index(
             name=index_name,
@@ -173,25 +230,23 @@ def ensure_index_exists(pc: Pinecone, index_name: str):
             )
         )
         # Esperar a que el índice esté listo
-        print("⏳ Esperando a que el índice esté listo...")
         time.sleep(60)  # Dar tiempo adicional para índices serverless
-    else:
-        print(f"✅ Índice {index_name} ya existe")
 
 def clear_database(pc: Pinecone, index_name: str):
-    """Elimina y recrea el índice en Pinecone"""
+    """Vacía el índice sin eliminarlo por completo"""
     try:
         indexes = pc.list_indexes()
         if index_name in indexes.names():
-            print(f"🗑️ Eliminando índice {index_name}")
-            pc.delete_index(index_name)
-            print(f"🗑️ Índice {index_name} eliminado")
-            time.sleep(20)
+            index = pc.Index(index_name)
             
-            # Recrear el índice después de eliminarlo
-            ensure_index_exists(pc, index_name)
+            # Vaciar el índice sin eliminarlo (más eficiente)
+            index.delete(delete_all=True)
+            print(f"Índice {index_name} vaciado correctamente")
+            
+            # Esperar brevemente para asegurar que la operación se complete
+            time.sleep(5)
     except Exception as e:
-        print(f"Error al reiniciar la base de datos: {e}")
+        print(f"Error al vaciar la base de datos: {e}")
 
 if __name__ == "__main__":
     main()
