@@ -2,7 +2,6 @@ import streamlit as st
 from langchain.memory import ConversationBufferMemory
 from src.populate_database import load_pinecone
 from src.utils.chains import create_conversation_chain
-# from src.text_preprocessing import preprocess_text
 from src.htmlTemplates import css, bot_template, user_template
 from src.config import DOCUMENT_TYPES, MEMORY_K
 
@@ -27,7 +26,6 @@ def setup():
         st.session_state.selected_sources = ["todos"]
 
 def handle_question(question):
-    # processed_question = preprocess_text(question)
     if not question.strip():
         st.warning("Por favor, ingresa una pregunta válida.")
         return
@@ -36,26 +34,43 @@ def handle_question(question):
         # Obtener historial de chat del estado de la sesión para la memoria
         chat_history = []
         for role, msg in st.session_state.chat_history:
-            if role == "user":
-                chat_history.append({"role": "user", "content": msg})
-            else:
-                chat_history.append({"role": "assistant", "content": msg})
+            chat_history.append({"role": role, "content": msg})
                 
         # Invocar la cadena con la nueva pregunta y el historial
-        response = st.session_state.chain.invoke({
+        response_data = st.session_state.chain.invoke({
             "question": question, 
             "chat_history": chat_history,
             "selected_sources": st.session_state.selected_sources
         })
-    
+        
+        respuesta = response_data["response"]
+        contexto = response_data["context"]
+        pregunta_reformulada = response_data["question"]
+
+        # Imprimir en consola para depuración
+        print("----- DEBUG INFO -----")
+        print("Pregunta original:", question)
+        print("Pregunta reformulada:", pregunta_reformulada)
+        print("Contexto enviado al modelo:", contexto)
+        print("Fuentes utilizadas:")
+        for idx, fuente in enumerate(contexto):
+            print(f"Fuente {idx + 1}: {fuente.metadata['source']}")
+            print(f"Contenido: {fuente.page_content[:500]}...")  # Mostrar solo una parte para evitar saturación
+
     # Actualizar historial de chat
     st.session_state.chat_history.append(("user", question))
-    st.session_state.chat_history.append(("bot", response))
+    st.session_state.chat_history.append(("bot", respuesta))
 
     # Renderizar historial de chat
     for role, msg in st.session_state.chat_history:
         template = user_template if role == "user" else bot_template
         st.write(template.replace("{{MSG}}", msg), unsafe_allow_html=True)
+
+    # Mostrar fuentes como desplegables con contenido completo
+    st.subheader("📚 Fuentes utilizadas:")
+    for idx, fuente in enumerate(contexto):
+        with st.expander(f"Fuente {idx + 1}: {fuente.metadata['source']}"):
+            st.write(fuente.page_content)
 
 def build_sidebar():
     with st.sidebar:

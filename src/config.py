@@ -23,5 +23,5 @@ PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
 
 # Configuración de recuperación
-RETRIEVER_K = 4
+RETRIEVER_K = 5
 MEMORY_K = 5
