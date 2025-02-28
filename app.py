@@ -2,7 +2,7 @@ import streamlit as st
 from langchain.memory import ConversationBufferMemory
 from src.populate_database import load_pinecone
 from src.utils.chains import create_conversation_chain
-from src.text_preprocessing import preprocess_text
+# from src.text_preprocessing import preprocess_text
 from src.htmlTemplates import css, bot_template, user_template
 from src.config import DOCUMENT_TYPES, MEMORY_K
 
@@ -27,8 +27,8 @@ def setup():
         st.session_state.selected_sources = ["todos"]
 
 def handle_question(question):
-    processed_question = preprocess_text(question)
-    if not processed_question.strip():
+    # processed_question = preprocess_text(question)
+    if not question.strip():
         st.warning("Por favor, ingresa una pregunta válida.")
         return
 
@@ -43,7 +43,7 @@ def handle_question(question):
                 
         # Invocar la cadena con la nueva pregunta y el historial
         response = st.session_state.chain.invoke({
-            "question": processed_question, 
+            "question": question, 
             "chat_history": chat_history,
             "selected_sources": st.session_state.selected_sources
         })

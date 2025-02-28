@@ -3,15 +3,18 @@ import os
 from langchain.document_loaders.pdf import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema.document import Document
-from src.get_embedding_function import get_embedding_function
+from .get_embedding_function import get_embedding_function
 from langchain_pinecone import PineconeVectorStore
-from src.text_preprocessing import preprocess_text
+# from src.text_preprocessing import preprocess_text
 from dotenv import load_dotenv
 from datetime import datetime
 import uuid
 from pinecone import Pinecone, ServerlessSpec
 import time
-from src.config import PINECONE_API_KEY, PINECONE_INDEX_NAME
+from .config import PINECONE_API_KEY, PINECONE_INDEX_NAME
+# Al inicio, agrega la importación de la función normalize_filename
+from .utils.normalize_filename import normalize_filename
+
 # Cargar variables de entorno
 load_dotenv()
 
@@ -79,18 +82,20 @@ def load_documents_from_directory(directory_path, doc_type):
     
     # Aplicar preprocesamiento y agregar metadatos de tipo de documento
     for doc in documents:
-        doc.page_content = preprocess_text(doc.page_content)
+        # doc.page_content = preprocess_text(doc.page_content)
         doc.metadata["doc_type"] = doc_type
         
-        # Extraer el nombre base del archivo para facilitar búsquedas específicas
+        # Extraer y normalizar el nombre base del archivo para búsquedas específicas
         source_path = doc.metadata.get("source", "")
-        doc.metadata["filename"] = os.path.basename(source_path)
+        original_filename = os.path.basename(source_path)
+        doc.metadata["filename"] = normalize_filename(original_filename)
     
     return documents
 
+
 def split_documents(documents: list[Document]):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
+        chunk_size=1500,
         chunk_overlap=100,
         length_function=len,
         separators=["\n\n", "\n", ".", "?", "!", " ", ""] 
@@ -127,8 +132,12 @@ def add_to_pinecone(chunks: list[Document], index_name: str, pc: Pinecone):
         
         # Añadir fecha de creación
         chunk.metadata["created_at"] = timestamp
-        # Asegurarse de que el texto está accesible en el campo text_key para Pinecone
-        chunk.metadata["text"] = chunk.page_content
+        # Integrar metadatos en el texto que se usará para los embeddings
+        chunk.metadata["text"] = (
+            f"Tipo: {chunk.metadata.get('doc_type', '')}. "
+            f"Archivo: {chunk.metadata.get('filename', '')}. "
+            f"{chunk.page_content}"
+        )
     
     # Crear o actualizar el almacén vectorial
     vector_store = PineconeVectorStore.from_documents(

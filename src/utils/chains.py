@@ -13,7 +13,7 @@ def create_filtered_retriever(vectorstore, selected_sources, question):
     return vectorstore.as_retriever(
         search_kwargs={
             "k": RETRIEVER_K,
-            "filter": filter_dict if filter_dict else None
+            # "filter": filter_dict if filter_dict else None
         }
     )
 
