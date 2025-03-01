@@ -1,5 +1,9 @@
-pypdf
+streamlit
+langchain-pinecone
+langchain-openai
+langchain-core
 langchain
-chromadb # Vector storage
-pytest
-boto3
+pinecone-client
+python-dotenv
+unidecode
+spacy
