@@ -1,5 +1,14 @@
 pypdf
 langchain
-chromadb # Vector storage
 pytest
 boto3
+streamlit
+pinecone-client
+pandas
+numpy
+langchain-community
+langchain-openai
+langchain-pinecone
+
+
+
