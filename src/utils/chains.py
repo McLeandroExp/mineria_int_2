@@ -15,6 +15,7 @@ def create_filtered_retriever(vectorstore, selected_sources, question):
             "k": RETRIEVER_K,
             # Si deseas aplicar el filtro, descomenta la siguiente línea:
             # "filter": filter_dict if filter_dict else None
+            # "text_key": "text"
         }
     )
 
@@ -47,17 +48,25 @@ def create_conversation_chain(vectorstore, selected_sources):
         """Recupera documentos, imprime en consola el contexto y la pregunta reformulada."""
         retriever = create_filtered_retriever(vectorstore, selected_sources, condensed_question)
         docs = retriever.get_relevant_documents(condensed_question)
+        
+        # Asegurarse de que page_content sea igual a full_text para cada documento
+        for doc in docs:
+            if "full_text" in doc.metadata:
+                doc.page_content = doc.metadata["full_text"]
+        
         print("----- DEBUG RETRIEVE -----")
         print("Pregunta reformulada:", condensed_question)
         print("Documentos recuperados:")
         for doc in docs:
             filename = doc.metadata.get("filename", "N/A")
             print(f"  - Fuente: {filename}")
-            snippet = doc.page_content[:2000] if len(doc.page_content) > 2000 else doc.page_content
-            print(f"    Contenido (snippet): {snippet}")
+            # Mostrar qué texto se usó para la búsqueda vs. qué texto se usará para responder
+            print(f"  - Texto optimizado (para búsqueda): {doc.metadata.get('text', 'N/A')[:200]}...")
+            print(f"  - Texto completo (para respuesta): {doc.page_content[:200]}...")
             print("  ----------------------")
+        
         return {"context": docs, "question": condensed_question}
-    
+
     def debug_answer(inputs):
         answer = answer_chain.invoke(inputs)
         print("----- DEBUG ANSWER -----")

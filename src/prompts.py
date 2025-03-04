@@ -27,3 +27,21 @@ Intenta identificar si la pregunta se refiere a artículos específicos de algú
 
 Pregunta reestructurada:
 """)
+
+# Prompt para optimizar la indexación en Pinecone (multi representation)
+MULTI_REPRESENTATION_PROMPT = PromptTemplate.from_template("""
+Eres un experto en legislación ecuatoriana y en procesamiento de documentos legales para optimización de búsqueda semántica.
+Analiza el siguiente fragmento de un documento legal y genera una representación optimizada para indexación.
+
+Instrucciones:
+1. Extrae y enfatiza los términos jurídicos y técnicos más relevantes.
+2. Identifica artículos, capítulos o normativas clave que puedan mejorar la búsqueda.
+3. No resumas el contenido, sino reescríbelo destacando los conceptos más importantes.
+4. Mantén la coherencia del texto para que conserve su significado legal preciso.
+5. Si hay referencias a leyes específicas, inclúyelas explícitamente en la reformulación.
+
+Documento original:
+{text}
+
+Representación optimizada para indexación:
+""")

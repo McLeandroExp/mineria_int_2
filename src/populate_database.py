@@ -14,6 +14,8 @@ from pinecone import Pinecone, ServerlessSpec
 import time
 from .config import PINECONE_API_KEY, PINECONE_INDEX_NAME
 from .utils.normalize_filename import normalize_filename
+# Importar la función para multi representation
+from .multi_representation import generate_summary
 
 # Cargar variables de entorno
 load_dotenv()
@@ -138,8 +140,8 @@ def load_new_documents(directory_path, doc_type, existing_files):
 
 def split_documents(documents: list[Document]):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,
-        chunk_overlap=100,
+        chunk_size=2500,
+        chunk_overlap=250,
         length_function=len,
         separators=["\n\n", "\n", ".", "?", "!", " ", ""] 
     )
@@ -178,18 +180,26 @@ def add_to_pinecone(chunks: list[Document], index_name: str, pc: Pinecone):
         chunk.metadata["original_doc_type"] = doc_type
         chunk.metadata["original_filename"] = source
         
-        # Integrar solo los metadatos necesarios en el texto para los embeddings
-        chunk.metadata["text"] = (
-            f"Tipo: {doc_type}. "
-            f"Archivo: {source}. "
-            f"Página: {page_label}. "
-            f"{chunk.page_content}"
-        )
+        # Generar el contexto completo (que incluye metadatos y contenido original)
+        full_text = f"Tipo: {doc_type}. Archivo: {source}. Página: {page_label}. {chunk.page_content}"
+        
+        # Generar resumen optimizado para la búsqueda usando multi representation
+        try:
+            summary_text = generate_summary(full_text)
+        except Exception as e:
+            print(f"Error al generar resumen para el chunk: {e}")
+            summary_text = full_text  # fallback a contenido completo si falla el resumen
+        
+        # Asignar el resumen para la búsqueda y conservar el contexto completo para la respuesta
+        chunk.metadata["full_text"] = full_text
+        chunk.metadata["text"] = summary_text
+        # Actualizar el contenido de la página para que, al mostrar el contexto, se vea el texto completo
+        chunk.page_content = full_text
     
     # Crear vectores con IDs personalizados
     vectors_with_ids = []
     
-    # Obtener embeddings para todos los chunks
+    # Obtener embeddings para todos los chunks usando la representación resumen
     texts = [chunk.metadata["text"] for chunk in chunks]
     embeddings = embedding_function.embed_documents(texts)
     
