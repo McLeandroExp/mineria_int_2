@@ -157,8 +157,7 @@ def add_to_pinecone(chunks: list[Document], index_name: str, pc: Pinecone):
     for chunk in chunks:
         # Obtener metadatos necesarios
         source = chunk.metadata.get("filename", "unknown")
-        page = chunk.metadata.get("page", "0")
-        page_label = chunk.metadata.get("page_label", page)
+        page = chunk.metadata.get("page_label", "0")
         doc_type = chunk.metadata.get("doc_type", "unknown")
         unique_id = str(uuid.uuid4())[:8]
         
@@ -176,11 +175,10 @@ def add_to_pinecone(chunks: list[Document], index_name: str, pc: Pinecone):
         chunk.metadata["created_at"] = timestamp
         
         # Guardar los valores originales en los metadatos para búsquedas
-        chunk.metadata["original_doc_type"] = doc_type
         chunk.metadata["original_filename"] = source
         
         # Generar el contexto completo (que incluye metadatos y contenido original)
-        full_text = f"Tipo: {doc_type}. Archivo: {source}. Página: {page_label}. {chunk.page_content}"
+        full_text = f"Tipo: {doc_type}. Archivo: {source}. Página: {page}. {chunk.page_content}"
         
         # Generar resumen optimizado para la búsqueda usando multi representation
         try:

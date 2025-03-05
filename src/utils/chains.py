@@ -5,17 +5,22 @@ from langchain_core.output_parsers import StrOutputParser
 from operator import itemgetter
 from src.config import MODEL_NAME, TEMPERATURE, OPENAI_API_KEY, RETRIEVER_K
 from src.prompts import ANSWER_PROMPT, CONDENSE_QUESTION_PROMPT
-from src.utils.filters import create_filter_dict
+# from src.utils.filters import create_filter_dict
 
 def create_filtered_retriever(vectorstore, selected_sources, question):
     """Crea un retriever filtrado basado en la selección y la pregunta"""
-    filter_dict = create_filter_dict(selected_sources, question)
+    
+    # Si el usuario ha seleccionado "todos", no se aplica filtro
+    if "todos" in selected_sources:
+        filter_dict = None
+    else:
+        # Construir filtro para doc_type
+        filter_dict = {"doc_type": {"$in": selected_sources}}
+    
     return vectorstore.as_retriever(
         search_kwargs={
-            "k": RETRIEVER_K,
-            # Si deseas aplicar el filtro, descomenta la siguiente línea:
-            # "filter": filter_dict if filter_dict else None
-            # "text_key": "text"
+            "k": RETRIEVER_K, 
+            "filter": filter_dict  # Aplicar filtro basado en los tipos seleccionados
         }
     )
 
