@@ -40,34 +40,27 @@ def handle_question(question):
             st.session_state.selected_sources
         )
         
-        # Obtener historial para la memoria
+        # Preparar el historial para la memoria
         chat_history = [
             {"role": role, "content": msg}
             for role, msg in st.session_state.chat_history
         ]
         
-        # Ejecutar la cadena
+        # Ejecutar la cadena y obtener respuesta
         response_data = chain.invoke({
             "question": question,
             "chat_history": chat_history,
             "selected_sources": st.session_state.selected_sources
         })
-
         respuesta = response_data["response"]
-        contexto = response_data["context"]
-
-    # Actualizar historial
+    
+    # Actualizar el historial en session_state
     st.session_state.chat_history.append(("user", question))
     st.session_state.chat_history.append(("bot", respuesta))
-
-    # Mostrar conversación
-    for role, msg in st.session_state.chat_history:
-        template = user_template if role == "user" else bot_template
-        st.write(template.replace("{{MSG}}", msg), unsafe_allow_html=True)
-
-    # Mostrar fuentes
+    
+    # Mostrar fuentes utilizadas
     st.subheader("📚 Fuentes utilizadas:")
-    for idx, fuente in enumerate(contexto):
+    for idx, fuente in enumerate(response_data["context"]):
         with st.expander(f"Fuente {idx + 1}: {fuente.metadata['source']}"):
             st.write(fuente.page_content)
 
@@ -95,16 +88,12 @@ def build_sidebar():
 def main():
     setup()
     build_sidebar()
-
-    # Mostrar historial previo de conversación (si existe)
-    if st.session_state.chat_history:
-        st.markdown("### Historial de Conversación")
-        for role, msg in st.session_state.chat_history:
-            template = user_template if role == "user" else bot_template
-            st.write(template.replace("{{MSG}}", msg), unsafe_allow_html=True)
-
-    # Usar un formulario para que la consulta solo se ejecute al enviar
-    with st.form(key="consulta_form"):
+    
+    # Definir un placeholder para el historial de chat (se mostrará de forma única)
+    chat_placeholder = st.empty()
+    
+    # Sección del prompt dentro de un formulario para que la consulta se ejecute solo al enviar
+    with st.form(key="consulta_form", clear_on_submit=True):
         user_question = st.text_input(
             "Haz tu pregunta legal:",
             key="user_input",
@@ -114,8 +103,13 @@ def main():
     
     if submit_button and user_question:
         handle_question(user_question)
-
-
+    
+    # Renderizar el historial de conversación usando el placeholder
+    with chat_placeholder.container():
+        st.markdown("### Historial de Conversación")
+        for role, msg in st.session_state.chat_history:
+            template = user_template if role == "user" else bot_template
+            st.write(template.replace("{{MSG}}", msg), unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
