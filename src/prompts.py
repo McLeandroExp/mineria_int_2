@@ -36,12 +36,12 @@ Analiza el siguiente fragmento de un documento legal y genera una representació
 Instrucciones:
 1. Extrae y enfatiza los términos jurídicos y técnicos más relevantes.
 2. Identifica artículos, capítulos o normativas clave que puedan mejorar la búsqueda.
-3. No resumas el contenido, sino reescríbelo destacando los conceptos más importantes.
+3. Expresa las representaciones de forma consisa.
 4. Mantén la coherencia del texto para que conserve su significado legal preciso.
 5. Si hay referencias a leyes específicas, inclúyelas explícitamente en la reformulación.
-
+6. Si hay prefijos de palabras legales o tecnicas reescribelas para que sean mas explícitas.
+7. Siempre mantén las referencias numéricas como el numero de ley o artículo.
+8. Unicamente responde con el texto optimizado                                                           
 Documento original:
-{text}
-
-Representación optimizada para indexación:
+\n\n{text}
 """)

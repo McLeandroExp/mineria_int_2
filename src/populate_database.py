@@ -14,7 +14,6 @@ from pinecone import Pinecone, ServerlessSpec
 import time
 from .config import PINECONE_API_KEY, PINECONE_INDEX_NAME
 from .utils.normalize_filename import normalize_filename
-# Importar la función para multi representation
 from .multi_representation import generate_summary
 
 # Cargar variables de entorno
@@ -140,8 +139,8 @@ def load_new_documents(directory_path, doc_type, existing_files):
 
 def split_documents(documents: list[Document]):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=2500,
-        chunk_overlap=250,
+        chunk_size=2000,
+        chunk_overlap=200,
         length_function=len,
         separators=["\n\n", "\n", ".", "?", "!", " ", ""] 
     )
