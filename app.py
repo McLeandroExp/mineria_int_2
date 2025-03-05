@@ -95,16 +95,27 @@ def build_sidebar():
 def main():
     setup()
     build_sidebar()
+
+    # Mostrar historial previo de conversación (si existe)
+    if st.session_state.chat_history:
+        st.markdown("### Historial de Conversación")
+        for role, msg in st.session_state.chat_history:
+            template = user_template if role == "user" else bot_template
+            st.write(template.replace("{{MSG}}", msg), unsafe_allow_html=True)
+
+    # Usar un formulario para que la consulta solo se ejecute al enviar
+    with st.form(key="consulta_form"):
+        user_question = st.text_input(
+            "Haz tu pregunta legal:",
+            key="user_input",
+            help="Presiona Enter o haz click en 'Enviar' para enviar tu pregunta"
+        )
+        submit_button = st.form_submit_button("Enviar")
     
-    # Input de pregunta con ejecución al presionar Enter
-    user_question = st.text_input(
-        "Haz tu pregunta legal:",
-        key="user_input",
-        help="Presiona Enter para enviar tu pregunta"
-    )
-    
-    if user_question:
+    if submit_button and user_question:
         handle_question(user_question)
+
+
 
 if __name__ == "__main__":
     main()
